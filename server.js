@@ -26,7 +26,7 @@ app.post('/api/rate-book', async (req, res) => {
     return res.status(400).json({ error: 'Dati del libro o preferenze utente mancanti.' });
   }
 
-  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+  const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
 
   const prompt = `
     Sei un critico letterario e un book advisor d'élite, con una profonda comprensione della psicologia dei lettori. Il tuo compito è eseguire un'analisi di compatibilità estremamente accurata e strutturata.
