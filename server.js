@@ -5,25 +5,18 @@ import 'dotenv/config';
 
 const app = express();
 
-const allowedOrigins = [
-    'http://localhost:5173',
-    'capacitor://localhost',
-    'http://localhost'
-];
-const corsOptions = {
-  origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  }
-};
+// --- CONFIGURAZIONE CORS FINALE ---
+// Abilita le richieste da QUALSIASI origine.
+// Questo è il modo standard e corretto per permettere alla tua app mobile di
+// comunicare con il server, indipendentemente da dove si trovi.
+app.use(cors()); 
 
-app.use(cors(corsOptions));
+// Middleware per interpretare il corpo delle richieste JSON
 app.use(express.json());
 
+// Inizializza l'IA leggendo la chiave API dalle variabili d'ambiente
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+
 
 // --- ROTTA PER IL RATING (CON PROMPT POTENZIATO) ---
 app.post('/api/rate-book', async (req, res) => {
@@ -35,7 +28,6 @@ app.post('/api/rate-book', async (req, res) => {
 
   const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-  // --- IL NUOVO PROMPT AVANZATO ---
   const prompt = `
     Sei un critico letterario e un book advisor d'élite, con una profonda comprensione della psicologia dei lettori. Il tuo compito è eseguire un'analisi di compatibilità estremamente accurata e strutturata.
 
@@ -98,10 +90,53 @@ app.post('/api/rate-book', async (req, res) => {
 });
 
 
-// ... (la tua rotta /api/describe-book e il resto del server rimangono invariati) ...
+// --- ROTTA PER LA DESCRIZIONE DEL LIBRO ---
+app.post('/api/describe-book', async (req, res) => {
+  const { book } = req.body;
+
+  if (!book) {
+    return res.status(400).json({ error: 'Dati del libro mancanti.' });
+  }
+
+  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+  const prompt = `
+    Sei un editor e un critico letterario di grande talento. Il tuo compito è creare una scheda di approfondimento per un libro, basandoti sui suoi metadati.
+
+    LIBRO TARGET:
+    - Titolo: ${book.title}
+    - Autori: ${book.authors?.join(', ')}
+    - Descrizione Originale: ${book.description}
+    - Categorie: ${book.categories?.join(', ')}
+
+    IL TUO COMPITO:
+    Restituisci ESCLUSIVAMENTE un oggetto JSON con la seguente struttura:
+    {
+      "enhanced_description": "stringa. Riscrivi la descrizione originale per renderla più avvincente e coinvolgente, in 2-3 frasi.",
+      "key_themes": ["array di 3-4 stringhe con i temi principali del libro (es. 'Amore e perdita', 'Critica sociale', 'Viaggio dell'eroe')"],
+      "target_audience": "stringa. Descrivi in una frase il tipo di lettore a cui consiglieresti questo libro (es. 'Perfetto per chi ama i gialli psicologici con una forte protagonista femminile.')"
+    }
+  `;
+
+  try {
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    const text = response.text();
+    
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error('La risposta dell\'IA per la descrizione non è in formato JSON valido.');
+    
+    const jsonData = JSON.parse(jsonMatch[0]);
+    res.json(jsonData);
+
+  } catch (error) {
+    console.error('Errore durante la generazione della descrizione AI:', error);
+    res.status(500).json({ error: "Impossibile generare la descrizione del libro." });
+  }
+});
 
 
+// --- AVVIO DEL SERVER ---
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
-  console.log(`Server potenziato in ascolto sulla porta ${PORT}`);
+  console.log(`Server in ascolto sulla porta ${PORT}`);
 });
