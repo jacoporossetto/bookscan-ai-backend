@@ -2,7 +2,6 @@ import express from 'express';
 import cors from 'cors';
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import 'dotenv/config';
-import { GoogleSearch } from "@google/generative-ai/server";
 
 const app = express();
 app.use(cors());
@@ -10,6 +9,7 @@ app.use(express.json());
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
+// Funzione di pulizia della descrizione
 const sanitizeDescription = (description) => {
   if (!description) return '';
   const withoutHtml = description.replace(/<[^>]*>?/gm, ' ').replace(/&[a-z]+;/gi, ' ');
@@ -17,33 +17,44 @@ const sanitizeDescription = (description) => {
   return singleSpace.length > 2500 ? `${singleSpace.substring(0, 2500)}...` : singleSpace;
 };
 
-// --- ROTTA UNICA E DEFINITIVA ---
+// --- ROTTA UNICA E POTENZIATA ---
 app.post('/api/analyze-book', async (req, res) => {
   try {
-    const { book, userPreferences, readingHistory } = req.body;
+    const { book, userPreferences } = req.body;
     if (!book || !userPreferences) {
       return res.status(400).json({ error: 'Dati del libro o preferenze utente mancanti.' });
     }
 
     let descriptionUsed = sanitizeDescription(book.description);
     
+    // --- Logica di Ricerca Autonoma ---
     if (!descriptionUsed || descriptionUsed.length < 150) {
       console.log(`⚠️ Descrizione per "${book.title}" mancante/corta. Avvio ricerca Google...`);
-      const searchModel = genAI.getGenerativeModel({ model: "gemini-1.5-pro", tools: { googleSearch: {} } });
+      // Configura il modello CON lo strumento di ricerca
+      const searchModel = genAI.getGenerativeModel({
+          model: "gemini-1.5-pro",
+          tools: [{googleSearch: {}}]
+      });
       const searchQuery = `trama completa libro ${book.title} ${book.authors?.[0] || ''}`;
-      const result = await searchModel.generateContent(`Usando la ricerca Google, trova e restituisci una sinossi dettagliata per il libro: ${searchQuery}`);
-      const foundText = result.response.text();
-      if (foundText) {
-        descriptionUsed = sanitizeDescription(foundText);
-        console.log(`✅ Trovata descrizione alternativa per "${book.title}"`);
-      } else {
-         console.log(`❌ Ricerca IA per "${book.title}" non ha prodotto risultati.`);
-         descriptionUsed = "Descrizione non trovata.";
+      try {
+        const result = await searchModel.generateContent(`Usando la ricerca Google, trova e restituisci una sinossi dettagliata per il libro: ${searchQuery}`);
+        const foundText = result.response.text();
+        if (foundText) {
+          descriptionUsed = sanitizeDescription(foundText);
+          console.log(`✅ Trovata descrizione alternativa per "${book.title}"`);
+        } else {
+           console.log(`❌ Ricerca IA per "${book.title}" non ha prodotto risultati utili.`);
+           descriptionUsed = "Descrizione non trovata.";
+        }
+      } catch (searchError) {
+          console.error(`Errore durante la ricerca IA per "${book.title}":`, searchError);
+          descriptionUsed = "Descrizione non trovata.";
       }
     } else {
         console.log(`✅ Usando la descrizione fornita per "${book.title}".`);
     }
 
+    // --- Logica di Analisi Finale ---
     const analysisModel = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
     const prompt = `
       PROCESSO DI ANALISI CRITICA OBBLIGATORIO:
