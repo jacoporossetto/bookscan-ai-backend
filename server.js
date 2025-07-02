@@ -3,8 +3,8 @@ import cors from 'cors';
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import 'dotenv/config';
 
-// Importiamo il nostro nuovo strumento di ricerca
-import { search } from '@google/generative-ai/server';
+// L'import corretto per la funzione di ricerca, come da documentazione ufficiale.
+import { GoogleSearch } from "@google/generative-ai/server";
 
 const app = express();
 app.use(cors());
@@ -19,7 +19,7 @@ const sanitizeDescription = (description) => {
   return singleSpace.length > 2000 ? `${singleSpace.substring(0, 2000)}...` : singleSpace;
 };
 
-// --- ROTTA DI RATING POTENZIATA CON RICERCA GOOGLE ---
+// --- ROTTA PER IL RATING CON RICERCA GOOGLE INTEGRATA ---
 app.post('/api/rate-book', async (req, res) => {
   try {
     const { book, userPreferences } = req.body;
@@ -30,29 +30,36 @@ app.post('/api/rate-book', async (req, res) => {
     let cleanBookDescription = sanitizeDescription(book.description);
 
     // --- LOGICA DI RICERCA AUTOMATICA ---
-    if (!cleanBookDescription || cleanBookDescription.length < 50) {
-      console.log(`⚠️ Descrizione per "${book.title}" mancante o troppo corta. Avvio ricerca su Google...`);
+    if (!cleanBookDescription || cleanBookDescription.length < 100) {
+      console.log(`⚠️ Descrizione per "${book.title}" mancante o troppo corta. Avvio ricerca Google...`);
       const searchQuery = `trama libro ${book.title} ${book.authors?.[0] || ''}`;
       try {
-        const searchResult = await search({ query: searchQuery });
-        // Prendiamo i primi 3 snippet e li uniamo per avere una descrizione più ricca
-        const snippets = searchResult.results.slice(0, 3).map(r => r.snippet).join(' ');
-        if (snippets) {
-          cleanBookDescription = sanitizeDescription(snippets);
-          console.log(`✅ Trovata descrizione alternativa per "${book.title}" tramite Google.`);
+        const model = genAI.getGenerativeModel({
+            model: "gemini-1.5-pro",
+            tools: [new GoogleSearch()],
+            toolConfig: {
+                googleSearch: {
+                    resultCount: 3
+                }
+            }
+        });
+        const result = await model.generateContent(`Riassumi in modo dettagliato la trama di questo libro: ${searchQuery}`);
+        const text = result.response.text();
+
+        if (text) {
+          cleanBookDescription = sanitizeDescription(text);
+          console.log(`✅ Trovata descrizione alternativa per "${book.title}" tramite ricerca IA.`);
         } else {
-           console.log(`❌ Ricerca Google per "${book.title}" non ha prodotto risultati utili.`);
+           console.log(`❌ Ricerca IA per "${book.title}" non ha prodotto risultati utili.`);
         }
       } catch (searchError) {
-          console.error(`Errore durante la ricerca Google per "${book.title}":`, searchError);
+          console.error(`Errore durante la ricerca IA per "${book.title}":`, searchError);
       }
     } else {
         console.log(`✅ Usando la descrizione fornita per "${book.title}".`);
     }
-    // ------------------------------------
 
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
-
+    const analysisModel = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
     const prompt = `
       Basandoti sul profilo del lettore e sulla descrizione del libro, esegui un'analisi di compatibilità accurata. La DESCRIZIONE è la fonte più importante.
       PROFILO LETTORE:
@@ -62,12 +69,11 @@ app.post('/api/rate-book', async (req, res) => {
       LIBRO TARGET:
       - Titolo: ${book.title}
       - Descrizione (da usare per l'analisi): "${cleanBookDescription}"
-
       OUTPUT JSON OBBLIGATORIO:
       { "final_rating": number, "short_reasoning": "stringa", "positive_points": ["array"], "negative_points": ["array"] }
     `;
 
-    const result = await model.generateContent(prompt);
+    const result = await analysisModel.generateContent(prompt);
     const response = await result.response;
     const text = response.text();
     const jsonMatch = text.match(/\{[\s\S]*\}/);
@@ -81,6 +87,8 @@ app.post('/api/rate-book', async (req, res) => {
   }
 });
 
+
+// AVVIO DEL SERVER
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`Server con ricerca Google integrata in ascolto su porta ${PORT}`);
