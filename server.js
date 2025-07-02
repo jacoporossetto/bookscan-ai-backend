@@ -20,14 +20,13 @@ const sanitizeDescription = (description) => {
 // --- ROTTA UNICA E DEFINITIVA ---
 app.post('/api/analyze-book', async (req, res) => {
   try {
-    const { book, userPreferences } = req.body;
+    const { book, userPreferences, readingHistory } = req.body;
     if (!book || !userPreferences) {
       return res.status(400).json({ error: 'Dati del libro o preferenze utente mancanti.' });
     }
 
     let descriptionUsed = sanitizeDescription(book.description);
     
-    // --- Logica di Ricerca Autonoma ---
     if (!descriptionUsed || descriptionUsed.length < 150) {
       console.log(`⚠️ Descrizione per "${book.title}" mancante/corta. Avvio ricerca Google...`);
       const searchModel = genAI.getGenerativeModel({ model: "gemini-1.5-pro", tools: { googleSearch: {} } });
@@ -45,7 +44,6 @@ app.post('/api/analyze-book', async (req, res) => {
         console.log(`✅ Usando la descrizione fornita per "${book.title}".`);
     }
 
-    // --- Logica di Analisi Finale ---
     const analysisModel = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
     const prompt = `
       PROCESSO DI ANALISI CRITICA OBBLIGATORIO:
@@ -74,12 +72,12 @@ app.post('/api/analyze-book', async (req, res) => {
               "style_affinity": { "score": number, "reason": "stringa breve motivazione" },
               "genre_affinity": { "score": number, "reason": "stringa breve motivazione" }
             },
-            "final_rating": number, // Punteggio finale da 1.0 a 5.0
+            "final_rating": number,
             "confidence_level": "stringa ('Alta', 'Media', 'Bassa')",
             "short_reasoning": "stringa di massimo 15 parole",
             "positive_points": ["array di 2-3 stringhe concise"],
             "negative_points": ["array di 1-2 stringhe concise"],
-            "description_used": "${descriptionUsed.replace(/"/g, '\\"')}" // Restituisce la descrizione usata per l'analisi
+            "description_used": "${descriptionUsed.replace(/"/g, '\\"')}"
           }
     `;
 
@@ -97,7 +95,6 @@ app.post('/api/analyze-book', async (req, res) => {
   }
 });
 
-// AVVIO DEL SERVER
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`Server Super-Intelligente in ascolto sulla porta ${PORT}`);
