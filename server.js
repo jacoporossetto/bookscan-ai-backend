@@ -17,7 +17,7 @@ const sanitizeDescription = (description) => {
   return singleSpace.length > 2500 ? `${singleSpace.substring(0, 2500)}...` : singleSpace;
 };
 
-// --- ROTTA UNICA E POTENZIATA ---
+// --- ROTTA UNICA E DEFINITIVA ---
 app.post('/api/analyze-book', async (req, res) => {
   try {
     const { book, userPreferences } = req.body;
@@ -30,10 +30,9 @@ app.post('/api/analyze-book', async (req, res) => {
     // --- Logica di Ricerca Autonoma ---
     if (!descriptionUsed || descriptionUsed.length < 150) {
       console.log(`⚠️ Descrizione per "${book.title}" mancante/corta. Avvio ricerca Google...`);
-      // Configura il modello CON lo strumento di ricerca
       const searchModel = genAI.getGenerativeModel({
           model: "gemini-1.5-pro",
-          tools: [{googleSearch: {}}]
+          tools: [{googleSearch: {}}] // Abilita lo strumento di ricerca
       });
       const searchQuery = `trama completa libro ${book.title} ${book.authors?.[0] || ''}`;
       try {
@@ -43,7 +42,7 @@ app.post('/api/analyze-book', async (req, res) => {
           descriptionUsed = sanitizeDescription(foundText);
           console.log(`✅ Trovata descrizione alternativa per "${book.title}"`);
         } else {
-           console.log(`❌ Ricerca IA per "${book.title}" non ha prodotto risultati utili.`);
+           console.log(`❌ Ricerca IA per "${book.title}" non ha prodotto risultati.`);
            descriptionUsed = "Descrizione non trovata.";
         }
       } catch (searchError) {
