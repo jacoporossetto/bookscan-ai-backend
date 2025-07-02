@@ -9,15 +9,18 @@ app.use(express.json());
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-// Funzione di pulizia della descrizione
+// --- FUNZIONE DI PULIZIA DEFINITIVA ---
+// Rimuove i tag HTML e altri artefatti comuni, garantendo testo pulito.
 const sanitizeDescription = (description) => {
-  if (!description) return '';
+  if (!description) return ''; // Restituisce una stringa vuota se non c'è descrizione.
+  // Rimuove tag HTML, entità HTML (es. &amp;) e spazi extra.
   const withoutHtml = description.replace(/<[^>]*>?/gm, ' ').replace(/&[a-z]+;/gi, ' ');
   const singleSpace = withoutHtml.replace(/\s+/g, ' ').trim();
-  return singleSpace.length > 2500 ? `${singleSpace.substring(0, 2500)}...` : singleSpace;
+  // Tronca a una lunghezza sicura per l'IA.
+  return singleSpace.length > 2000 ? `${singleSpace.substring(0, 2000)}...` : singleSpace;
 };
 
-// --- ROTTA UNICA E DEFINITIVA ---
+// --- ROTTA UNICA E POTENZIATA ---
 app.post('/api/analyze-book', async (req, res) => {
   try {
     const { book, userPreferences } = req.body;
@@ -25,14 +28,15 @@ app.post('/api/analyze-book', async (req, res) => {
       return res.status(400).json({ error: 'Dati del libro o preferenze utente mancanti.' });
     }
 
-    let descriptionUsed = sanitizeDescription(book.description);
-    
-    // --- Logica di Ricerca Autonoma ---
+    // --- PULIZIA DEI DATI E LOG DI CONTROLLO ---
+    const cleanBookDescription = sanitizeDescription(book.description);
+    let descriptionUsed = cleanBookDescription;
+
     if (!descriptionUsed || descriptionUsed.length < 150) {
       console.log(`⚠️ Descrizione per "${book.title}" mancante/corta. Avvio ricerca Google...`);
       const searchModel = genAI.getGenerativeModel({
           model: "gemini-1.5-pro",
-          tools: [{googleSearch: {}}] // Abilita lo strumento di ricerca
+          tools: [{googleSearch: {}}]
       });
       const searchQuery = `trama completa libro ${book.title} ${book.authors?.[0] || ''}`;
       try {
@@ -42,7 +46,7 @@ app.post('/api/analyze-book', async (req, res) => {
           descriptionUsed = sanitizeDescription(foundText);
           console.log(`✅ Trovata descrizione alternativa per "${book.title}"`);
         } else {
-           console.log(`❌ Ricerca IA per "${book.title}" non ha prodotto risultati.`);
+           console.log(`❌ Ricerca IA per "${book.title}" non ha prodotto risultati utili.`);
            descriptionUsed = "Descrizione non trovata.";
         }
       } catch (searchError) {
