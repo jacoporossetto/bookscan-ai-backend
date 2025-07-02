@@ -10,13 +10,14 @@ app.use(express.json());
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 // --- FUNZIONE DI PULIZIA DEFINITIVA ---
-// Questa funzione ora vive sul server, garantendo che i dati siano sempre puliti.
+// Rimuove i tag HTML e altri artefatti comuni, garantendo testo pulito.
 const sanitizeDescription = (description) => {
-  if (!description) return ''; // Restituisce una stringa vuota se non c'è descrizione
-  // Rimuove i tag HTML e altri artefatti comuni
-  const withoutHtml = description.replace(/<[^>]*>?/gm, '');
-  // Tronca a una lunghezza sicura per l'IA
-  return withoutHtml.length > 2000 ? `${withoutHtml.substring(0, 2000)}...` : withoutHtml;
+  if (!description) return ''; // Restituisce una stringa vuota se non c'è descrizione.
+  // Rimuove tag HTML, entità HTML (es. &amp;) e spazi extra.
+  const withoutHtml = description.replace(/<[^>]*>?/gm, ' ').replace(/&[a-z]+;/gi, ' ');
+  const singleSpace = withoutHtml.replace(/\s+/g, ' ').trim();
+  // Tronca a una lunghezza sicura per l'IA.
+  return singleSpace.length > 2000 ? `${singleSpace.substring(0, 2000)}...` : singleSpace;
 };
 
 // --- ROTTA PER IL RATING (ORA USA LA DESCRIZIONE PULITA) ---
@@ -27,65 +28,45 @@ app.post('/api/rate-book', async (req, res) => {
       return res.status(400).json({ error: 'Dati del libro o preferenze utente mancanti.' });
     }
 
-    // --- PULIZIA DEI DATI ALL'INTERNO DEL SERVER ---
+    // --- PULIZIA DEI DATI E LOG DI CONTROLLO ---
     const cleanBookDescription = sanitizeDescription(book.description);
-
-    // --- LOG DI CONTROLLO ---
-    if (cleanBookDescription && cleanBookDescription.length > 20) {
-      console.log(`✅ Trovata e utilizzata descrizione per "${book.title}" (Lunghezza: ${cleanBookDescription.length} caratteri).`);
+    if (cleanBookDescription) {
+      console.log(`✅ OK: Descrizione per "${book.title}" pulita e pronta per l'analisi (Lunghezza: ${cleanBookDescription.length}).`);
     } else {
-      console.log(`⚠️ Attenzione: Descrizione per "${book.title}" non trovata o troppo corta. L'analisi si baserà sugli altri dati.`);
+      console.log(`⚠️ ATTENZIONE: Descrizione per "${book.title}" non trovata o vuota dopo la pulizia.`);
     }
-    // -------------------------
+    // ---------------------------------------------
 
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
 
     const prompt = `
-      Sei un critico letterario e un book advisor d'élite, con una profonda comprensione della psicologia dei lettori. La tua unica missione è eseguire un'analisi di compatibilità estremamente accurata e strutturata, basandoti sui dati forniti.
+      Sei un critico letterario e book advisor d'élite. La tua missione è eseguire un'analisi di compatibilità accurata basandoti sui dati forniti. La DESCRIZIONE del libro è la fonte più importante.
 
-      **PROCESSO DI ANALISI OBBLIGATORIO (Chain of Thought):**
-
-      **1. Analisi Profilo Lettore:** Assimila il profilo del lettore per capire i suoi desideri.
-      * **Generi Preferiti:** ${userPreferences.favoriteGenres?.join(', ') || 'Non specificati'}
-      * **Bio / Cosa Cerca in una Storia:** "${userPreferences.bio || 'Non specificata'}"
-      * **Vibes / Atmosfere Desiderate:** ${userPreferences.vibes?.join(', ') || 'Non specificate'}
-
-      **2. Analisi del Libro Target:** Analizza il libro, usando la descrizione come fonte primaria.
-      * **Titolo:** ${book.title}
-      * **Descrizione (fonte di verità per trama e stile):** "${cleanBookDescription}"  // <-- USA LA DESCRIZIONE PULITA
-      * **Categorie Fornite:** ${book.categories?.join(', ')}
-
-      **3. Analisi Comparativa con Punteggi Parziali (da 1.0 a 5.0):**
-      * **Affinità Trama (Peso 50%):** La **descrizione** del libro promette una trama che si allinea con la **bio** del lettore? Valuta e assegna un punteggio.
-      * **Affinità Stile/Vibes (Peso 30%):** Il tono della **descrizione** è in linea con le **vibes** desiderate? Valuta e assegna un punteggio.
-      * **Affinità Genere (Peso 20%):** Le **categorie** del libro combaciano con i **generi preferiti**? Considera anche generi affini. Valuta e assegna un punteggio.
-
-      **4. Calcolo Punteggio Finale e Output:**
-      * Calcola il **punteggio finale** come media ponderata dei tre sotto-punteggi.
-      * Basandoti sulla qualità delle informazioni, determina il tuo livello di confidenza.
-      * Estrai i punti chiave positivi e negativi.
-      * Fornisci la tua analisi **ESCLUSIVAMENTE** in formato JSON, senza testo, commenti o markdown prima o dopo.
-
-      **STRUTTURA JSON DI OUTPUT OBBLIGATORIA:**
-      {
-        "rating_details": { "plot_affinity": { "score": number, "reason": "stringa" }, "style_affinity": { "score": number, "reason": "stringa" }, "genre_affinity": { "score": number, "reason": "stringa" } },
-        "final_rating": number,
-        "confidence_level": "stringa ('Alta', 'Media' o 'Bassa')",
-        "short_reasoning": "stringa",
-        "positive_points": ["array di stringhe"],
-        "negative_points": ["array di stringhe"]
-      }
+      **PROCESSO DI ANALISI OBBLIGATORIO:**
+      1.  **Analisi Profilo Lettore:**
+          * Generi Preferiti: ${userPreferences.favoriteGenres?.join(', ') || 'N/A'}
+          * Bio/Cosa Cerca: "${userPreferences.bio || 'N/A'}"
+          * Vibes Desiderate: ${userPreferences.vibes?.join(', ') || 'N/A'}
+      2.  **Analisi Libro Target (basata sulla descrizione pulita):**
+          * Titolo: ${book.title}
+          * Descrizione Fornita: "${cleanBookDescription}"
+      3.  **Analisi Comparativa:** Basandoti sulla **descrizione**, valuta l'affinità della trama e dello stile con le preferenze del lettore.
+      4.  **Output JSON Obbligatorio:**
+          {
+            "final_rating": number,
+            "short_reasoning": "stringa max 15 parole che riassume il tuo giudizio",
+            "positive_points": ["array di 2-3 motivi per cui potrebbe piacere, basati sulla descrizione"],
+            "negative_points": ["array di 1-2 potenziali punti deboli, basati sulla descrizione"]
+          }
     `;
 
     const result = await model.generateContent(prompt);
     const response = await result.response;
     const text = response.text();
-    
     const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error('La risposta dell\'IA per il rating non è in formato JSON valido.');
+    if (!jsonMatch) throw new Error('Risposta IA non in formato JSON valido.');
     
-    const jsonData = JSON.parse(jsonMatch[0]);
-    res.status(200).json(jsonData);
+    res.status(200).json(JSON.parse(jsonMatch[0]));
 
   } catch (error) {
     console.error('ERRORE CRITICO NEL SERVER /api/rate-book:', error);
